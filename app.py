@@ -5,6 +5,7 @@ import pytesseract
 import numpy as np
 import re
 import os
+import sys
 
 app = Flask(__name__)
 CORS(app)
@@ -99,7 +100,21 @@ def scan():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Get port from environment or use 8080
-    port = int(os.getenv('PORT', 8080))
-    print(f"Starting OCR service on port {port}")
+    # Debug: Print all environment variables
+    print("=== Environment Variables ===", file=sys.stderr)
+    for key, value in os.environ.items():
+        if 'PORT' in key.upper():
+            print(f"{key}={value}", file=sys.stderr)
+    
+    # Get port with explicit fallback
+    port_str = os.environ.get('PORT', '8080')
+    print(f"PORT string: '{port_str}'", file=sys.stderr)
+    
+    try:
+        port = int(port_str)
+    except ValueError:
+        print(f"Invalid PORT value: '{port_str}', using 8080", file=sys.stderr)
+        port = 8080
+    
+    print(f"Starting OCR service on 0.0.0.0:{port}", file=sys.stderr)
     app.run(host='0.0.0.0', port=port, debug=False)

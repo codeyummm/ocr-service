@@ -41,11 +41,6 @@ def extract_tracking(text):
             return match.group(0), carrier.upper()
     return None, None
 
-def extract_carrier(text):
-    carrier_pattern = r'\b(USPS|UPS|FEDEX|DHL)\b'
-    match = re.search(carrier_pattern, text, re.IGNORECASE)
-    return match.group(1).upper() if match else None
-
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'healthy', 'service': 'OCR Scanner'})
@@ -93,10 +88,6 @@ def scan():
             if carrier_from_tracking:
                 shipping_info['carrier'] = carrier_from_tracking
         
-        carrier = extract_carrier(text)
-        if carrier and 'carrier' not in shipping_info:
-            shipping_info['carrier'] = carrier
-        
         return jsonify({
             'success': True,
             'device': device_info,
@@ -108,5 +99,7 @@ def scan():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    # Get port from environment or use 8080
+    port = int(os.getenv('PORT', 8080))
+    print(f"Starting OCR service on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)

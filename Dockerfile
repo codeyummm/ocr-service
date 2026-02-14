@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 
 # Expose port
-EXPOSE $PORT
+EXPOSE 8080
 
-# Run the app
-CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 60
+# Run the app - Railway will inject PORT env var
+CMD gunicorn app:app --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 60

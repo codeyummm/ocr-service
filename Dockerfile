@@ -15,5 +15,5 @@ COPY app.py .
 
 EXPOSE 8080
 
-# Use shell form to allow environment variable expansion
-CMD sh -c "python app.py"
+# Shell form - allows $PORT expansion
+CMD python app.py

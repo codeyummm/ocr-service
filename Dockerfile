@@ -13,11 +13,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
+# Copy application and startup script
 COPY app.py .
+COPY start.sh .
+RUN chmod +x start.sh
 
 # Expose port
 EXPOSE 8080
 
-# Run the app - Railway will inject PORT env var
-CMD gunicorn app:app --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 60
+# Run the app
+CMD ["./start.sh"]

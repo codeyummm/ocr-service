@@ -15,4 +15,5 @@ COPY app.py .
 
 EXPOSE 8080
 
-CMD ["python", "app.py"]
+# Use shell form to allow environment variable expansion
+CMD sh -c "python app.py"

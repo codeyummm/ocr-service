@@ -11,35 +11,28 @@ CORS(app)
 
 def preprocess_image(image):
     """Enhanced preprocessing for shipping labels"""
-    # Convert to grayscale
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
-    # Resize if image is too small
     height, width = gray.shape
     if height < 1000:
         scale = 1000 / height
         gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
     
-    # Denoise
     denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
-    
-    # Increase contrast using CLAHE
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     enhanced = clahe.apply(denoised)
-    
-    # Apply adaptive threshold
     binary = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
     
     return binary
 
 def extract_imei(text):
-    # IMEI is exactly 15 digits
+    # Remove spaces and look for 15 consecutive digits
+    cleaned = re.sub(r'\s+', '', text)
     pattern = r'\b\d{15}\b'
-    matches = re.findall(pattern, text)
+    matches = re.findall(pattern, cleaned)
     return matches[0] if matches else None
 
 def extract_model(text):
-    # Look for iPhone, iPad, etc with model number
     pattern = r'(iPhone|iPad|iPod)\s*(\d{1,2}\s*(?:Pro|Max|Plus|Mini)?(?:\s*(?:Pro|Max))?)'
     match = re.search(pattern, text, re.IGNORECASE)
     if match:
@@ -47,14 +40,17 @@ def extract_model(text):
     return None
 
 def extract_tracking(text):
+    # Remove spaces for pattern matching
+    cleaned = re.sub(r'\s+', '', text)
+    
     patterns = {
+        'USPS': r'(94|93|92|95)\d{20,22}',
         'UPS': r'1Z[A-Z0-9]{16}',
-        'USPS': r'\b(94|93|92|95)\d{20,22}\b',
-        'FEDEX': r'\b\d{12,14}\b'
+        'FEDEX': r'\d{12,14}'
     }
     
     for carrier, pattern in patterns.items():
-        match = re.search(pattern, text)
+        match = re.search(pattern, cleaned)
         if match:
             return match.group(0), carrier
     return None, None
@@ -77,14 +73,11 @@ def scan():
         if image is None:
             return jsonify({'success': False, 'error': 'Invalid image'}), 400
         
-        # Preprocess image
         processed = preprocess_image(image)
         
-        # Extract text with multiple PSM modes
         custom_config = r'--oem 3 --psm 6'
         text = pytesseract.image_to_string(processed, config=custom_config)
         
-        # Try PSM 11 (sparse text) if PSM 6 didn't work well
         if len(text.strip()) < 20:
             custom_config = r'--oem 3 --psm 11'
             text = pytesseract.image_to_string(processed, config=custom_config)
@@ -94,20 +87,21 @@ def scan():
         device_info = {}
         shipping_info = {}
         
-        # Extract device information
         imei = extract_imei(text)
         if imei:
             device_info['imei'] = imei
+            print(f"Found IMEI: {imei}")
         
         model = extract_model(text)
         if model:
             device_info['model'] = model
+            print(f"Found model: {model}")
         
-        # Extract shipping information
         tracking, carrier = extract_tracking(text)
         if tracking:
             shipping_info['tracking_number'] = tracking
             shipping_info['carrier'] = carrier
+            print(f"Found tracking: {tracking} ({carrier})")
         
         return jsonify({
             'success': True,

@@ -5,41 +5,58 @@ import pytesseract
 import numpy as np
 import re
 import os
-import sys
 
 app = Flask(__name__)
 CORS(app)
 
+def preprocess_image(image):
+    """Enhanced preprocessing for shipping labels"""
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Resize if image is too small
+    height, width = gray.shape
+    if height < 1000:
+        scale = 1000 / height
+        gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    
+    # Denoise
+    denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+    
+    # Increase contrast using CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    enhanced = clahe.apply(denoised)
+    
+    # Apply adaptive threshold
+    binary = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    
+    return binary
+
 def extract_imei(text):
-    imei_pattern = r'\b\d{15}\b'
-    match = re.search(imei_pattern, text)
-    return match.group(0) if match else None
+    # IMEI is exactly 15 digits
+    pattern = r'\b\d{15}\b'
+    matches = re.findall(pattern, text)
+    return matches[0] if matches else None
 
 def extract_model(text):
-    model_pattern = r'(iPhone|iPad|iPod|Apple Watch|MacBook|iMac)\s*(\d{1,2}\s*(?:Pro|Max|Plus|Mini)?)'
-    match = re.search(model_pattern, text, re.IGNORECASE)
-    return f"{match.group(1)} {match.group(2)}".strip() if match else None
-
-def extract_storage(text):
-    storage_pattern = r'\b(64|128|256|512|1024|1|2)(?:GB|TB)\b'
-    match = re.search(storage_pattern, text, re.IGNORECASE)
-    return match.group(0) if match else None
-
-def extract_color(text):
-    color_pattern = r'\b(Space Gray|Silver|Gold|Rose Gold|Black|White|Blue|Green|Red|Purple|Graphite|Midnight|Starlight)\b'
-    match = re.search(color_pattern, text, re.IGNORECASE)
-    return match.group(0) if match else None
+    # Look for iPhone, iPad, etc with model number
+    pattern = r'(iPhone|iPad|iPod)\s*(\d{1,2}\s*(?:Pro|Max|Plus|Mini)?(?:\s*(?:Pro|Max))?)'
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        return f"{match.group(1)} {match.group(2)}".strip()
+    return None
 
 def extract_tracking(text):
     patterns = {
-        'usps': r'\b(94|93|92|94|95)\d{20,22}\b',
-        'ups': r'\b1Z[A-Z0-9]{16}\b',
-        'fedex': r'\b\d{12,15}\b'
+        'UPS': r'1Z[A-Z0-9]{16}',
+        'USPS': r'\b(94|93|92|95)\d{20,22}\b',
+        'FEDEX': r'\b\d{12,14}\b'
     }
+    
     for carrier, pattern in patterns.items():
         match = re.search(pattern, text)
         if match:
-            return match.group(0), carrier.upper()
+            return match.group(0), carrier
     return None, None
 
 @app.route('/health', methods=['GET'])
@@ -60,13 +77,24 @@ def scan():
         if image is None:
             return jsonify({'success': False, 'error': 'Invalid image'}), 400
         
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        processed = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        text = pytesseract.image_to_string(processed)
+        # Preprocess image
+        processed = preprocess_image(image)
+        
+        # Extract text with multiple PSM modes
+        custom_config = r'--oem 3 --psm 6'
+        text = pytesseract.image_to_string(processed, config=custom_config)
+        
+        # Try PSM 11 (sparse text) if PSM 6 didn't work well
+        if len(text.strip()) < 20:
+            custom_config = r'--oem 3 --psm 11'
+            text = pytesseract.image_to_string(processed, config=custom_config)
+        
+        print(f"Extracted text: {text}")
         
         device_info = {}
         shipping_info = {}
         
+        # Extract device information
         imei = extract_imei(text)
         if imei:
             device_info['imei'] = imei
@@ -75,19 +103,11 @@ def scan():
         if model:
             device_info['model'] = model
         
-        storage = extract_storage(text)
-        if storage:
-            device_info['storage'] = storage
-        
-        color = extract_color(text)
-        if color:
-            device_info['color'] = color
-        
-        tracking, carrier_from_tracking = extract_tracking(text)
+        # Extract shipping information
+        tracking, carrier = extract_tracking(text)
         if tracking:
             shipping_info['tracking_number'] = tracking
-            if carrier_from_tracking:
-                shipping_info['carrier'] = carrier_from_tracking
+            shipping_info['carrier'] = carrier
         
         return jsonify({
             'success': True,
@@ -97,24 +117,10 @@ def scan():
         })
         
     except Exception as e:
+        print(f"Error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
-    # Debug: Print all environment variables
-    print("=== Environment Variables ===", file=sys.stderr)
-    for key, value in os.environ.items():
-        if 'PORT' in key.upper():
-            print(f"{key}={value}", file=sys.stderr)
-    
-    # Get port with explicit fallback
-    port_str = os.environ.get('PORT', '8080')
-    print(f"PORT string: '{port_str}'", file=sys.stderr)
-    
-    try:
-        port = int(port_str)
-    except ValueError:
-        print(f"Invalid PORT value: '{port_str}', using 8080", file=sys.stderr)
-        port = 8080
-    
-    print(f"Starting OCR service on 0.0.0.0:{port}", file=sys.stderr)
+    port = int(os.getenv('PORT', 8080))
+    print(f"Starting OCR service on port {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
